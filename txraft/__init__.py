@@ -1,7 +1,7 @@
 from collections import namedtuple
 from twisted.python.constants import Names, NamedConstant
 from twisted.internet import reactor
-from twisted.internet.defer import succeed, inlineCallbacks, returnValue
+from twisted.internet.defer import succeed, inlineCallbacks, returnValue, gatherResults
 from twisted.protocols.amp import AMP, CommandLocator, Command
 
 
@@ -46,9 +46,24 @@ class RaftNode(object):
 
         returnValue((currentTerm, True))
 
-
+    @inlineCallbacks
     def respond_requestVote(self, term, canditateId, lastLogIndex, lastLogTerm):
-        pass
+        currentTerm = yield self.store.getCurrentTerm()
+
+        if term < currentTerm:
+            returnValue((currentTerm, False))
+
+        votedFor = yield self.store.getVotedFor()
+        if votedFor is None or votedFor == canditateId:
+            currentTerm, logIndex = yield gatherResults([
+                self.store.getCurrentTerm(),
+                self.store.getLastIndex()
+            ])
+            if (currentTerm > lastLogTerm) or (currentTerm == lastLogTerm and logIndex > lastLogIndex):
+                returnValue((term, False))
+            else:
+                yield self.store.setVotedFor(canditateId)
+                returnValue((term, True))
 
 
 class MockStoreDontUse(object):
@@ -77,6 +92,11 @@ class MockStoreDontUse(object):
 
     def getCurrentTerm(self):
         return succeed(self.currentTerm)
+
+    def getLastIndex(self):
+        if not self.log:
+            return succeed(0)
+        return succeed(self.log[-1].index)
 
     def contains(self, term, index):
         return any(e.term == term and e.index == index for e in self.log)
