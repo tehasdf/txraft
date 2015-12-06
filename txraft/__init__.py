@@ -75,7 +75,28 @@ class MockStoreDontUse(object):
     def contains(self, term, index):
         return any(e.term == term and e.index == index for e in self.log)
 
+    def _byIndex(self, ix):
+        for entry in self.log:
+            if entry.index == ix:
+                return entry
+        raise IndexError(ix)
+
+    def deleteAfter(self, ix, inclusive=True):
+        deleteFromIndex = self._byIndex(ix).index
+        if not inclusive:
+            deleteFromIndex -= 1
+        self.log = [e for e in self.log if e.index < deleteFromIndex]
+
     def insert(self, entries):
+        for entry in entries:
+            try:
+                oldentry = self._byIndex(entry.index)
+            except IndexError:
+                pass
+            else:
+                if oldentry.term != entry.term:
+                    self.deleteAfter(entry.index)
+
         for entry in entries:
             self.log.append(entry)
 
