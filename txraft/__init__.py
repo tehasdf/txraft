@@ -38,6 +38,12 @@ class RaftNode(object):
 
         yield self.store.insert(entries)
 
+        if leaderCommit > self.commitIndex:
+            if entries:
+                commitIndex = min([leaderCommit, entries[-1].index])
+            else:
+                commitIndex = leaderCommit
+
         returnValue((currentTerm, True))
 
 
