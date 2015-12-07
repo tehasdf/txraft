@@ -47,13 +47,13 @@ class RaftNode(object):
         self._state = STATE.CANDIDATE
         self.electionTimeout.stop()
         currentTerm, logIndex, term = yield gatherResults([
-                self.store.getCurrentTerm(),
-                self.store.getLastIndex(),
-                self.store.getLastTerm(),
+                self._store.getCurrentTerm(),
+                self._store.getLastIndex(),
+                self._store.getLastTerm(),
             ])
-        yield self.store.setCurrentTerm(currentTerm + 1)
+        yield self._store.setCurrentTerm(currentTerm + 1)
 
-        electionResult = yield self.rpc.requestVotes(currentTerm, self.id, logIndex, term)
+        electionResult = yield self._rpc.requestVotes(currentTerm, self.id, logIndex, term)
         if electionResult:
             assert self._state is STATE.CANDIDATE
             self.becomeLeader()
@@ -84,21 +84,21 @@ class RaftNode(object):
 
     @inlineCallbacks
     def respond_requestVote(self, term, canditateId, lastLogIndex, lastLogTerm):
-        currentTerm = yield self.store.getCurrentTerm()
+        currentTerm = yield self._store.getCurrentTerm()
 
         if term < currentTerm:
             returnValue((currentTerm, False))
 
-        votedFor = yield self.store.getVotedFor()
+        votedFor = yield self._store.getVotedFor()
         if votedFor is None or votedFor == canditateId:
             currentTerm, logIndex = yield gatherResults([
-                self.store.getCurrentTerm(), # XXX should this be the current term, or term of last log entry?
-                self.store.getLastIndex()
+                self._store.getCurrentTerm(), # XXX should this be the current term, or term of last log entry?
+                self._store.getLastIndex()
             ])
             if (currentTerm > lastLogTerm) or (currentTerm == lastLogTerm and logIndex > lastLogIndex):
                 returnValue((term, False))
             else:
-                yield self.store.setVotedFor(canditateId)
+                yield self._store.setVotedFor(canditateId)
                 returnValue((term, True))
 
 
@@ -171,7 +171,7 @@ class MockStoreDontUse(object):
 class MockRPC(object):
     def __init__(self, nodes=None):
         if nodes is None:
-            self.nodes = []
+            nodes = []
         self.nodes = nodes
 
     def simpleAddNode(self, node):
@@ -186,7 +186,6 @@ class MockRPC(object):
 
         votesYes = 1
         votesNo = 0
-
         while True:
             (responder_term, result), ix = yield DeferredList(responses)
             if result:

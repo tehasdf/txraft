@@ -1,6 +1,7 @@
+from twisted.internet.task import Clock
 from twisted.trial.unittest import TestCase
 
-from . import MockStoreDontUse, Entry
+from . import MockStoreDontUse, Entry, RaftNode, MockRPC, STATE
 
 
 class TestMockStoreInsert(TestCase):
@@ -39,3 +40,29 @@ class TestMockStoreInsert(TestCase):
         store.insert([newentry1, newentry2, newentry3])
 
         self.assertEqual(store.log, [oldentry1, newentry1, newentry2, newentry3])
+
+
+class TestElection(TestCase):
+    def test_three_up(self):
+        store1 = MockStoreDontUse()
+        store2 = MockStoreDontUse()
+        store3 = MockStoreDontUse()
+        rpc1 = MockRPC()
+        rpc2 = MockRPC()
+        rpc3 = MockRPC()
+
+        clock1 = Clock()
+        clock2 = Clock()
+        clock3 = Clock()
+
+        node1 = RaftNode(1, store1, rpc1, clock=clock1)
+        node2 = RaftNode(2, store2, rpc2, clock=clock2)
+        node3 = RaftNode(3, store3, rpc3, clock=clock3)
+
+        for rpc in [rpc1, rpc2, rpc3]:
+            for node in [node1, node2, node3]:
+                rpc.simpleAddNode(node)
+
+
+        clock1.advance(0.4)
+        self.assertIs(node1._state, STATE.LEADER)
