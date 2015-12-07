@@ -1,8 +1,13 @@
+# coding: utf-8
+
 from collections import namedtuple
+import random
+
 from twisted.python.constants import Names, NamedConstant
 from twisted.internet import reactor
-from twisted.internet.defer import succeed, inlineCallbacks, returnValue, gatherResults
+from twisted.internet.defer import succeed, inlineCallbacks, returnValue, gatherResults, DeferredList
 from twisted.protocols.amp import AMP, CommandLocator, Command
+from twisted.internet.task import LoopingCall
 
 
 Entry = namedtuple('Entry', ['term', 'index', 'payload'])
@@ -17,7 +22,8 @@ class STATE(Names):
 class RaftNode(object):
     """
     """
-    def __init__(self, store, rpc, clock=reactor):
+    def __init__(self, node_id, store, rpc, clock=reactor):
+        self.id = node_id
         self._store = store
         self._rpc = rpc
 
@@ -25,6 +31,36 @@ class RaftNode(object):
 
         self.commitIndex = 0
         self.lastApplied = 0
+
+        self.electionTimeout = LoopingCall(self._onElectionTimeout)
+        self.electionTimeout.clock = clock
+        self.electionTimeout.start(random.uniform(0.15, 0.3), now=False)
+
+        self.heartbeatSender = LoopingCall(self._sendHeartbeat)
+        self.heartbeatSender.clock = clock
+
+    def _sendHeartbeat(self):
+        pass
+
+    @inlineCallbacks
+    def _onElectionTimeout(self):
+        self._state = STATE.CANDIDATE
+        self.electionTimeout.stop()
+        currentTerm, logIndex, term = yield gatherResults([
+                self.store.getCurrentTerm(),
+                self.store.getLastIndex(),
+                self.store.getLastTerm(),
+            ])
+        yield self.store.setCurrentTerm(currentTerm + 1)
+
+        electionResult = yield self.rpc.requestVotes(currentTerm, self.id, logIndex, term)
+        if electionResult:
+            assert self._state is STATE.CANDIDATE
+            self.becomeLeader()
+
+    def becomeLeader(self):
+        self._state = STATE.LEADER
+        self.heartbeatSender.start(0.05, now=True)
 
     @inlineCallbacks
     def respond_appendEntries(self, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
@@ -56,7 +92,7 @@ class RaftNode(object):
         votedFor = yield self.store.getVotedFor()
         if votedFor is None or votedFor == canditateId:
             currentTerm, logIndex = yield gatherResults([
-                self.store.getCurrentTerm(),
+                self.store.getCurrentTerm(), # XXX should this be the current term, or term of last log entry?
                 self.store.getLastIndex()
             ])
             if (currentTerm > lastLogTerm) or (currentTerm == lastLogTerm and logIndex > lastLogIndex):
@@ -98,6 +134,11 @@ class MockStoreDontUse(object):
             return succeed(0)
         return succeed(self.log[-1].index)
 
+    def getLastTerm(self):
+        if not self.log:
+            return succeed(0)
+        return succeed(self.log[-1].term)
+
     def contains(self, term, index):
         return any(e.term == term and e.index == index for e in self.log)
 
@@ -126,6 +167,7 @@ class MockStoreDontUse(object):
         for entry in entries:
             self.log.append(entry)
 
+
 class MockRPC(object):
     def __init__(self, nodes=None):
         if nodes is None:
@@ -135,4 +177,29 @@ class MockRPC(object):
     def simpleAddNode(self, node):
         self.nodes.append(node)
 
+    @inlineCallbacks
+    def requestVotes(self, term, canditateId, lastLogIndex, lastLogTerm):
+        responses = [
+            node.respond_requestVote(term, canditateId, lastLogIndex, lastLogTerm)
+            for node in self.nodes if node.id != canditateId
+        ]
 
+        votesYes = 1
+        votesNo = 0
+
+        while True:
+            (responder_term, result), ix = yield DeferredList(responses)
+            if result:
+                votesYes += 1
+            else:
+                votesNo += 1
+
+            if votesYes * 2 > len(self.nodes):
+                returnValue(True)
+                break
+            if votesNo * 2 > len(self.nodes):
+                returnValue(False)
+
+            responses.pop(ix)
+            if not responses:
+                returnValue(False)
