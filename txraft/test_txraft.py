@@ -63,6 +63,80 @@ class TestElection(TestCase):
             for node in [node1, node2, node3]:
                 rpc.simpleAddNode(node)
 
-
         clock1.advance(0.4)
         self.assertIs(node1._state, STATE.LEADER)
+
+    def test_respond_requestVote(self):
+        store = MockStoreDontUse()
+        rpc = MockRPC()
+        clock = Clock()
+        node = RaftNode(1, store, rpc, clock=clock)
+
+        resp = node.respond_requestVote(5, 2, 4, 4)
+        term, result = self.successResultOf(resp)
+        self.assertTrue(result)
+        votedFor = self.successResultOf(store.getVotedFor())
+        self.assertEqual(votedFor, 2)
+
+    def test_respond_requestVote_alreadyVoted(self):
+        store = MockStoreDontUse()
+        store.setVotedFor(3)
+        rpc = MockRPC()
+        clock = Clock()
+        node = RaftNode(1, store, rpc, clock=clock)
+
+        resp = node.respond_requestVote(5, 2, 4, 4)
+        term, result = self.successResultOf(resp)
+        self.assertFalse(result)
+
+        resp = node.respond_requestVote(5, 3, 4, 4)
+        term, result = self.successResultOf(resp)
+        self.assertTrue(result)
+
+    def test_respond_requestVote_lowerTerm(self):
+        store = MockStoreDontUse()
+        store.setCurrentTerm(3)
+        rpc = MockRPC()
+        clock = Clock()
+        node = RaftNode(1, store, rpc, clock=clock)
+
+        resp = node.respond_requestVote(2, 'id', 4, 4)
+        term, result = self.successResultOf(resp)
+        self.assertFalse(result)
+
+    def test_respond_requestVote_oldLog(self):
+        store = MockStoreDontUse(entries=[
+            Entry(term=2, index=2, payload=1),
+            Entry(term=3, index=3, payload=2)
+        ])
+        store.setCurrentTerm(3)
+        rpc = MockRPC()
+        clock = Clock()
+        node = RaftNode(1, store, rpc, clock=clock)
+
+        resp = node.respond_requestVote(4, 'id', 2, 2)
+        term, result = self.successResultOf(resp)
+        self.assertFalse(result)
+
+        resp = node.respond_requestVote(4, 'id', 4, 2)
+        term, result = self.successResultOf(resp)
+        self.assertFalse(result)
+
+        resp = node.respond_requestVote(4, 'id', lastLogIndex=2, lastLogTerm=3)
+        term, result = self.successResultOf(resp)
+        self.assertFalse(result)
+
+class TestAppendEntries(TestCase):
+    def test_respond_appendEntries_simple(self):
+        store = MockStoreDontUse()
+        rpc = MockRPC()
+        clock = Clock()
+        node = RaftNode(1, store, rpc, clock=clock)
+
+        newentry = Entry(term=0, index=1, payload=1)
+
+        resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
+            prevLogTerm=0, entries=[newentry], leaderCommit=1)
+        term, result = self.successResultOf(resp)
+        self.assertEqual(term, 0)
+        self.assertTrue(result)

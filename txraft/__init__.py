@@ -64,15 +64,15 @@ class RaftNode(object):
 
     @inlineCallbacks
     def respond_appendEntries(self, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
-        currentTerm = yield self.store.getCurrentTerm()
+        currentTerm = yield self._store.getCurrentTerm()
 
         if term < currentTerm:
             returnValue((currentTerm, False))
 
-        if not (yield self.store.contains(term=prevLogTerm, index=prevLogIndex)):
+        if not (yield self._store.contains(term=prevLogTerm, index=prevLogIndex)):
             returnValue((currentTerm, False))
 
-        yield self.store.insert(entries)
+        yield self._store.insert(entries)
 
         if leaderCommit > self.commitIndex:
             if entries:
@@ -100,6 +100,7 @@ class RaftNode(object):
             else:
                 yield self._store.setVotedFor(canditateId)
                 returnValue((term, True))
+        returnValue((term, False))
 
 
 class MockStoreDontUse(object):
@@ -140,6 +141,8 @@ class MockStoreDontUse(object):
         return succeed(self.log[-1].term)
 
     def contains(self, term, index):
+        if not self.log and term == index == 0:
+            return True
         return any(e.term == term and e.index == index for e in self.log)
 
     def _byIndex(self, ix):
