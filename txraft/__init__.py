@@ -22,22 +22,30 @@ class STATE(Names):
 class RaftNode(object):
     """
     """
-    def __init__(self, node_id, store, rpc, clock=reactor):
+
+    def __init__(self, node_id, store, rpc, clock=reactor, electionTimeout=None):
         self.id = node_id
         self._store = store
         self._rpc = rpc
+        self._electionTimeout = None
 
         self._state = STATE.FOLLOWER
 
         self.commitIndex = 0
         self.lastApplied = 0
 
-        self.electionTimeout = LoopingCall(self._onElectionTimeout)
-        self.electionTimeout.clock = clock
-        self.electionTimeout.start(random.uniform(0.15, 0.3), now=False)
+        self.electionTimeoutLoop = LoopingCall(self._onElectionTimeout)
+        self.electionTimeoutLoop.clock = clock
+        self.electionTimeoutLoop.start(self._getElectionTimeout(), now=False)
 
         self.heartbeatSender = LoopingCall(self._sendHeartbeat)
         self.heartbeatSender.clock = clock
+
+    def _getElectionTimeout(self):
+        if self._electionTimeout is None:
+            return random.uniform(0.15, 0.3)
+        else:
+            return self._electionTimeout
 
     def _sendHeartbeat(self):
         pass
@@ -45,7 +53,7 @@ class RaftNode(object):
     @inlineCallbacks
     def _onElectionTimeout(self):
         self._state = STATE.CANDIDATE
-        self.electionTimeout.stop()
+        self.electionTimeoutLoop.stop()
         currentTerm, logIndex, term = yield gatherResults([
                 self._store.getCurrentTerm(),
                 self._store.getLastIndex(),
@@ -69,6 +77,11 @@ class RaftNode(object):
         if term < currentTerm:
             returnValue((currentTerm, False))
 
+        if term > currentTerm:
+            yield self._store.setCurrentTerm(term)
+            if self._state is not STATE.FOLLOWER:
+                self._state = STATE.FOLLOWER
+
         if not (yield self._store.contains(term=prevLogTerm, index=prevLogIndex)):
             returnValue((currentTerm, False))
 
@@ -88,6 +101,11 @@ class RaftNode(object):
 
         if term < currentTerm:
             returnValue((currentTerm, False))
+
+        if term > currentTerm:
+            yield self._store.setCurrentTerm(term)
+            if self._state is not STATE.FOLLOWER:
+                self._state = STATE.FOLLOWER
 
         votedFor = yield self._store.getVotedFor()
         if votedFor is None or votedFor == canditateId:
@@ -190,7 +208,7 @@ class MockRPC(object):
         votesYes = 1
         votesNo = 0
         while True:
-            (responder_term, result), ix = yield DeferredList(responses)
+            (responder_term, result), ix = yield DeferredList(responses, fireOnOneCallback=True)
             if result:
                 votesYes += 1
             else:
@@ -205,3 +223,4 @@ class MockRPC(object):
             responses.pop(ix)
             if not responses:
                 returnValue(False)
+
