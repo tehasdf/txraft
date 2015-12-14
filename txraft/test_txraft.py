@@ -6,40 +6,40 @@ from . import MockStoreDontUse, Entry, RaftNode, MockRPC, STATE
 
 class TestMockStoreInsert(TestCase):
     def test_empty(self):
-        store = MockStoreDontUse([])
-        newentry = Entry(term=1, index=2, payload=True)
-        store.insert([newentry])
+        store = MockStoreDontUse()
+        newentry = Entry(term=1, payload=True)
+        store.insert({1: newentry})
 
-        self.assertEqual(store.log, [newentry])
+        self.assertEqual(store.log, {1: newentry})
 
     def test_noconflict(self):
-        oldentry = Entry(term=1, index=1, payload=True)
-        store = MockStoreDontUse([oldentry])
-        newentry = Entry(term=1, index=2, payload=True)
-        store.insert([newentry])
+        oldentry = Entry(term=1, payload=True)
+        store = MockStoreDontUse({1: oldentry})
+        newentry = Entry(term=1, payload=True)
+        store.insert({2: newentry})
 
-        self.assertEqual(store.log, [oldentry, newentry])
+        self.assertEqual(store.log, {1: oldentry, 2: newentry})
 
     def test_conflict_last(self):
-        oldentry = Entry(term=1, index=1, payload=False)
-        store = MockStoreDontUse([oldentry])
-        newentry = Entry(term=2, index=1, payload=True)
-        store.insert([newentry])
+        oldentry = Entry(term=1, payload=False)
+        store = MockStoreDontUse({1: oldentry})
+        newentry = Entry(term=2, payload=True)
+        store.insert({1: newentry})
 
-        self.assertEqual(store.log, [newentry])
+        self.assertEqual(store.log, {1: newentry})
 
     def test_conflict_many(self):
 
-        oldentry1 = Entry(term=1, index=1, payload=1)
-        oldentry2 = Entry(term=1, index=2, payload=2)
-        oldentry3 = Entry(term=1, index=3, payload=3)
-        store = MockStoreDontUse([oldentry1, oldentry2, oldentry3])
-        newentry1 = Entry(term=2, index=2, payload=4)
-        newentry2 = Entry(term=2, index=3, payload=5)
-        newentry3 = Entry(term=2, index=4, payload=6)
-        store.insert([newentry1, newentry2, newentry3])
+        oldentry1 = Entry(term=1, payload=1)
+        oldentry2 = Entry(term=1, payload=2)
+        oldentry3 = Entry(term=1, payload=3)
+        store = MockStoreDontUse({1: oldentry1, 2: oldentry2, 3: oldentry3})
+        newentry1 = Entry(term=2, payload=4)
+        newentry2 = Entry(term=2, payload=5)
+        newentry3 = Entry(term=2, payload=6)
+        store.insert({2: newentry1, 3: newentry2, 4: newentry3})
 
-        self.assertEqual(store.log, [oldentry1, newentry1, newentry2, newentry3])
+        self.assertEqual(store.log, {1: oldentry1, 2: newentry1, 3: newentry2, 4: newentry3})
 
 
 class TestElection(TestCase):
@@ -72,7 +72,7 @@ class TestElection(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        resp = node.respond_requestVote(5, 2, 4, 4)
+        resp = node.respond_requestVote(4, 2, 4, 4)
         term, result = self.successResultOf(resp)
         self.assertTrue(result)
         votedFor = self.successResultOf(store.getVotedFor())
@@ -85,11 +85,11 @@ class TestElection(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        resp = node.respond_requestVote(5, 2, 4, 4)
+        resp = node.respond_requestVote(4, 2, 4, 4)
         term, result = self.successResultOf(resp)
         self.assertFalse(result)
 
-        resp = node.respond_requestVote(5, 3, 4, 4)
+        resp = node.respond_requestVote(4, 3, 4, 4)
         term, result = self.successResultOf(resp)
         self.assertTrue(result)
 
@@ -105,10 +105,10 @@ class TestElection(TestCase):
         self.assertFalse(result)
 
     def test_respond_requestVote_oldLog(self):
-        store = MockStoreDontUse(entries=[
-            Entry(term=2, index=2, payload=1),
-            Entry(term=3, index=3, payload=2)
-        ])
+        store = MockStoreDontUse(entries={
+            2: Entry(term=2, payload=1),
+            3: Entry(term=3, payload=2)
+        })
         store.setCurrentTerm(3)
         rpc = MockRPC()
         clock = Clock()
@@ -134,14 +134,14 @@ class TestAppendEntries(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        newentry = Entry(term=0, index=1, payload=1)
+        newentry = Entry(term=0, payload=1)
 
         resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
-            prevLogTerm=0, entries=[newentry], leaderCommit=1)
+            prevLogTerm=0, entries={1: newentry}, leaderCommit=1)
         term, result = self.successResultOf(resp)
         self.assertEqual(term, 0)
         self.assertTrue(result)
-        self.assertEqual(store.log, [newentry])
+        self.assertEqual(store.log, {1: newentry})
 
     def test_respond_appendEntries_empty(self):
         store = MockStoreDontUse()
@@ -149,24 +149,10 @@ class TestAppendEntries(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        newentry = Entry(term=0, index=1, payload=1)
+        newentry = Entry(term=0, payload=1)
 
         resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
-            prevLogTerm=0, entries=[], leaderCommit=1)
-        term, result = self.successResultOf(resp)
-        self.assertEqual(term, 0)
-        self.assertTrue(result)
-
-    def test_respond_appendEntries_empty(self):
-        store = MockStoreDontUse()
-        rpc = MockRPC()
-        clock = Clock()
-        node = RaftNode(1, store, rpc, clock=clock)
-
-        newentry = Entry(term=0, index=1, payload=1)
-
-        resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
-            prevLogTerm=0, entries=[], leaderCommit=1)
+            prevLogTerm=0, entries={}, leaderCommit=1)
         term, result = self.successResultOf(resp)
         self.assertEqual(term, 0)
         self.assertTrue(result)

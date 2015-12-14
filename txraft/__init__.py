@@ -10,7 +10,7 @@ from twisted.protocols.amp import AMP, CommandLocator, Command
 from twisted.internet.task import LoopingCall
 
 
-Entry = namedtuple('Entry', ['term', 'index', 'payload'])
+Entry = namedtuple('Entry', ['term', 'payload'])
 
 
 class STATE(Names):
@@ -90,7 +90,6 @@ class RaftNode(object):
         currentTerm = yield self._store.getCurrentTerm()
 
         if term < currentTerm:
-            print 'returning 0'
             returnValue((currentTerm, False))
 
         if term > currentTerm:
@@ -99,14 +98,14 @@ class RaftNode(object):
                 self._state = STATE.FOLLOWER
 
         if not (yield self._store.contains(term=prevLogTerm, index=prevLogIndex)):
-            print 'returning 1'
             returnValue((currentTerm, False))
 
         yield self._store.insert(entries)
 
         if leaderCommit > self.commitIndex:
             if entries:
-                commitIndex = min([leaderCommit, entries[-1].index])
+                last_index = max(entries.keys())
+                commitIndex = min([leaderCommit, last_index])
             else:
                 commitIndex = leaderCommit
 
@@ -117,7 +116,7 @@ class RaftNode(object):
         currentTerm = yield self._store.getCurrentTerm()
 
         if term < currentTerm:
-            returnValue((currentTerm, False))
+           returnValue((currentTerm, False))
 
         if term > currentTerm:
             yield self._store.setCurrentTerm(term)
@@ -143,13 +142,22 @@ class MockStoreDontUse(object):
         self.currentTerm = 0
         self.votedFor = None
         if entries is None:
-            entries = []
+            entries = {}
         self.log = entries
 
-    def addToLog(self, entry):
-        self.log.append(entry)
-        currentIndex = len(self.log) + 1
-        return succeed(currentIndex)
+    def getLastIndex(self):
+        if not self.log:
+            return succeed(0)
+
+        return succeed(max(self.log.iterkeys()))
+
+    def getLastTerm(self):
+        if not self.log:
+            return succeed(0)
+
+        return (self.getLastIndex()
+            .addCallback(lambda index: self.log[index].term)
+        )
 
     def setVotedFor(self, votedFor):
         self.votedFor = votedFor
@@ -165,45 +173,27 @@ class MockStoreDontUse(object):
     def getCurrentTerm(self):
         return succeed(self.currentTerm)
 
-    def getLastIndex(self):
-        if not self.log:
-            return succeed(0)
-        return succeed(self.log[-1].index)
-
-    def getLastTerm(self):
-        if not self.log:
-            return succeed(0)
-        return succeed(self.log[-1].term)
-
     def contains(self, term, index):
-        if not self.log and term == index == 0:
+        if term == index == 0:
             return True
-        return any(e.term == term and e.index == index for e in self.log)
-
-    def _byIndex(self, ix):
-        for entry in self.log:
-            if entry.index == ix:
-                return entry
-        raise IndexError(ix)
+        return index in self.log and self.log[index].term == term
 
     def deleteAfter(self, ix, inclusive=True):
-        deleteFromIndex = self._byIndex(ix).index
         if not inclusive:
-            deleteFromIndex -= 1
-        self.log = [e for e in self.log if e.index < deleteFromIndex]
+            ix += 1
+        while True:
+            if not ix in self.log:
+                break
+            del self.log[ix]
+            ix += 1
 
     def insert(self, entries):
-        for entry in entries:
-            try:
-                oldentry = self._byIndex(entry.index)
-            except IndexError:
-                pass
-            else:
-                if oldentry.term != entry.term:
-                    self.deleteAfter(entry.index)
+        for index, entry in entries.iteritems():
+            if index in self.log and self.log[index].term != entry.term:
+                self.deleteAfter(index)
 
-        for entry in entries:
-            self.log.append(entry)
+        for index, entry in entries.iteritems():
+            self.log[index] = entry
 
 
 class MockRPC(object):
