@@ -126,6 +126,7 @@ class TestElection(TestCase):
         term, result = self.successResultOf(resp)
         self.assertFalse(result)
 
+
 class TestAppendEntries(TestCase):
     def test_respond_appendEntries_simple(self):
         store = MockStoreDontUse()
@@ -140,3 +141,33 @@ class TestAppendEntries(TestCase):
         term, result = self.successResultOf(resp)
         self.assertEqual(term, 0)
         self.assertTrue(result)
+        self.assertEqual(store.log, [newentry])
+
+    def test_respond_appendEntries_empty(self):
+        store = MockStoreDontUse()
+        rpc = MockRPC()
+        clock = Clock()
+        node = RaftNode(1, store, rpc, clock=clock)
+
+        newentry = Entry(term=0, index=1, payload=1)
+
+        resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
+            prevLogTerm=0, entries=[], leaderCommit=1)
+        term, result = self.successResultOf(resp)
+        self.assertEqual(term, 0)
+        self.assertTrue(result)
+
+    def test_respond_appendEntries_empty(self):
+        store = MockStoreDontUse()
+        rpc = MockRPC()
+        clock = Clock()
+        node = RaftNode(1, store, rpc, clock=clock)
+
+        newentry = Entry(term=0, index=1, payload=1)
+
+        resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
+            prevLogTerm=0, entries=[], leaderCommit=1)
+        term, result = self.successResultOf(resp)
+        self.assertEqual(term, 0)
+        self.assertTrue(result)
+
