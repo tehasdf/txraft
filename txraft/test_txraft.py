@@ -172,6 +172,30 @@ class TestAppendEntries(TestCase):
         self.assertTrue(result)
 
 
+class TestCallingAppendEntries(TestCase):
+    def test_backwards(self):
+        clock = Clock()
+
+        leader_store = MockStoreDontUse(entries=[
+            Entry(term=1, index=1, payload=1),
+            Entry(term=2, index=2, payload=2),
+        ])
+        leader_store.setCurrentTerm(2)
+        leader_rpc = MockRPC()
+        leader = RaftNode(1, leader_store, leader_rpc, clock=clock)
+
+        follower_store = MockStoreDontUse()
+        follower_rpc = MockRPC()
+        follower = RaftNode(2, follower_store, follower_rpc, clock=clock)
+
+        leader_rpc.simpleAddNode(follower)
+        follower_rpc.simpleAddNode(leader)
+
+        d = leader._callAppendEntries(follower.id, [])
+        res = self.successResultOf(d)
+        print 'res', res
+
+
 class TestCluster(TestCase):
 
     def test_cluster(self):
@@ -194,6 +218,6 @@ class TestCluster(TestCase):
         for node, rpc, store, clock in nodes:
             clock.advance(1.0)
 
-        for node, rpc, store, clock in nodes:
-            print 'asd', node._state
+        # for node, rpc, store, clock in nodes:
+        #     print 'asd', node._state
 

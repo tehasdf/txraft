@@ -41,12 +41,24 @@ class RaftNode(object):
         self.heartbeatSender = LoopingCall(self._sendHeartbeat)
         self.heartbeatSender.clock = clock
 
+        self._appendEntriesLocks = {}
+
     def _getElectionTimeout(self):
         if self._electionTimeout is None:
             return random.uniform(0.15, 0.3)
         else:
             return self._electionTimeout
 
+    @inlineCallbacks
+    def _callAppendEntries(self, targetId, entries):
+        currentTerm, prevLogIndex, prevLogTerm = yield gatherResults([
+            self._store.getCurrentTerm(),
+            self._store.getLastIndex(),
+            self._store.getLastTerm(),
+        ])
+        res = yield self._rpc.appendEntries(targetId, currentTerm, self.id,
+            prevLogIndex, prevLogTerm, entries, self.commitIndex)
+        returnValue(res)
     def _sendHeartbeat(self):
         pass
 
@@ -68,6 +80,9 @@ class RaftNode(object):
 
     def becomeLeader(self):
         self._state = STATE.LEADER
+        self.nextIndex = {}
+        self.matchIndex = {}
+        self._appendEntriesLocks = {}
         self.heartbeatSender.start(0.05, now=True)
 
     @inlineCallbacks
@@ -75,6 +90,7 @@ class RaftNode(object):
         currentTerm = yield self._store.getCurrentTerm()
 
         if term < currentTerm:
+            print 'returning 0'
             returnValue((currentTerm, False))
 
         if term > currentTerm:
@@ -83,6 +99,7 @@ class RaftNode(object):
                 self._state = STATE.FOLLOWER
 
         if not (yield self._store.contains(term=prevLogTerm, index=prevLogIndex)):
+            print 'returning 1'
             returnValue((currentTerm, False))
 
         yield self._store.insert(entries)
@@ -223,4 +240,8 @@ class MockRPC(object):
             responses.pop(ix)
             if not responses:
                 returnValue(False)
+
+    def appendEntries(self, otherId, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
+        target = [node for node in self.nodes if node.id == otherId][0]
+        return target.respond_appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit)
 
