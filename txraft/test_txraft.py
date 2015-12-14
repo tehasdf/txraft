@@ -171,3 +171,29 @@ class TestAppendEntries(TestCase):
         self.assertEqual(term, 0)
         self.assertTrue(result)
 
+
+class TestCluster(TestCase):
+
+    def test_cluster(self):
+        nodes = []
+        for num in range(5):
+            clock = Clock()
+            rpc = MockRPC()
+            store = MockStoreDontUse()
+            node = RaftNode(num, store, rpc, clock=clock, electionTimeout=1)
+            nodes.append((node, rpc, store, clock))
+
+
+        for node1, rpc, _, _ in nodes:
+            for node2, _, _, _ in nodes:
+                if node1 is node2:
+                    continue
+                rpc.simpleAddNode(node2)
+
+
+        for node, rpc, store, clock in nodes:
+            clock.advance(1.0)
+
+        for node, rpc, store, clock in nodes:
+            print 'asd', node._state
+
