@@ -162,10 +162,10 @@ class TestCallingAppendEntries(TestCase):
     def test_backwards(self):
         clock = Clock()
 
-        leader_store = MockStoreDontUse(entries=[
-            Entry(term=1, index=1, payload=1),
-            Entry(term=2, index=2, payload=2),
-        ])
+        leader_store = MockStoreDontUse(entries={
+            1: Entry(term=1, payload=1),
+            2: Entry(term=2, payload=2),
+        })
         leader_store.setCurrentTerm(2)
         leader_rpc = MockRPC()
         leader = RaftNode(1, leader_store, leader_rpc, clock=clock)
@@ -177,9 +177,64 @@ class TestCallingAppendEntries(TestCase):
         leader_rpc.simpleAddNode(follower)
         follower_rpc.simpleAddNode(leader)
 
-        d = leader._callAppendEntries(follower.id, [])
+        d = leader._callAppendEntries(follower.id, {})
         res = self.successResultOf(d)
-        print 'res', res
+
+        self.assertEqual(leader_store.log, follower_store.log)
+
+    def test_add(self):
+        clock = Clock()
+
+        leader_store = MockStoreDontUse(entries={
+            1: Entry(term=1, payload=1),
+            2: Entry(term=2, payload=2),
+            3: Entry(term=2, payload=3),
+        })
+        leader_store.setCurrentTerm(2)
+        leader_rpc = MockRPC()
+        leader = RaftNode(1, leader_store, leader_rpc, clock=clock)
+
+        follower_store = MockStoreDontUse({
+            1: Entry(term=1, payload=1)
+        })
+        follower_rpc = MockRPC()
+        follower = RaftNode(2, follower_store, follower_rpc, clock=clock)
+
+        leader_rpc.simpleAddNode(follower)
+        follower_rpc.simpleAddNode(leader)
+
+        d = leader._callAppendEntries(follower.id, {})
+        res = self.successResultOf(d)
+
+        self.assertEqual(leader_store.log, follower_store.log)
+
+
+    def test_remove_incorrect(self):
+        clock = Clock()
+
+        leader_store = MockStoreDontUse(entries={
+            1: Entry(term=1, payload=1),
+            2: Entry(term=2, payload=2),
+            3: Entry(term=2, payload=3),
+        })
+        leader_store.setCurrentTerm(2)
+        leader_rpc = MockRPC()
+        leader = RaftNode(1, leader_store, leader_rpc, clock=clock)
+
+        follower_store = MockStoreDontUse({
+            1: Entry(term=1, payload=1),
+            2: Entry(term=5, payload=1)
+        })
+        follower_rpc = MockRPC()
+        follower = RaftNode(2, follower_store, follower_rpc, clock=clock)
+
+        leader_rpc.simpleAddNode(follower)
+        follower_rpc.simpleAddNode(leader)
+
+        d = leader._callAppendEntries(follower.id, {})
+        res = self.successResultOf(d)
+
+        self.assertEqual(leader_store.log, follower_store.log)
 
 
 class TestCluster(TestCase):

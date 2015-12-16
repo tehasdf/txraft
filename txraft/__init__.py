@@ -56,9 +56,32 @@ class RaftNode(object):
             self._store.getLastIndex(),
             self._store.getLastTerm(),
         ])
-        res = yield self._rpc.appendEntries(targetId, currentTerm, self.id,
-            prevLogIndex, prevLogTerm, entries, self.commitIndex)
-        returnValue(res)
+
+        while True:
+            peerTerm, result = yield self._rpc.appendEntries(targetId, currentTerm, self.id,
+                prevLogIndex, prevLogTerm, entries, self.commitIndex)
+            if not result:
+                if peerTerm > currentTerm:
+                    raise Exception("term - turn to follower?")
+                if entries:
+                    firstIndex = min(entries.keys())
+                    previous = firstIndex - 1
+                else:
+                    previous = yield self._store.getLastIndex()
+                previousEntry = yield self._store.getByIndex(previous)
+                try:
+                    previous_previousEntry = yield self._store.getByIndex(previous - 1)
+                except KeyError:
+                    prevLogIndex = 0
+                    prevLogTerm = 0
+                else:
+                    prevLogTerm = previous_previousEntry.term
+                    prevLogIndex = previous - 1
+                entries[previous] = previousEntry
+            else:
+                break
+        returnValue(1)
+
     def _sendHeartbeat(self):
         pass
 
@@ -159,6 +182,9 @@ class MockStoreDontUse(object):
             .addCallback(lambda index: self.log[index].term)
         )
 
+    def getByIndex(self, ix):
+        return succeed(self.log[ix])
+
     def setVotedFor(self, votedFor):
         self.votedFor = votedFor
         return succeed(True)
@@ -234,4 +260,3 @@ class MockRPC(object):
     def appendEntries(self, otherId, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
         target = [node for node in self.nodes if node.id == otherId][0]
         return target.respond_appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit)
-
