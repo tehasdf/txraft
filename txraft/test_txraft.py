@@ -1,7 +1,70 @@
+from twisted.internet.defer import succeed
 from twisted.internet.task import Clock
 from twisted.trial.unittest import TestCase
 
-from . import MockStoreDontUse, Entry, RaftNode, MockRPC, STATE
+from . import  Entry, RaftNode, MockRPC, STATE
+
+
+class MockStoreDontUse(object):
+    def __init__(self, entries=None):
+        self.currentTerm = 0
+        self.votedFor = None
+        if entries is None:
+            entries = {}
+        self.log = entries
+
+    def getLastIndex(self):
+        if not self.log:
+            return succeed(0)
+
+        return succeed(max(self.log.iterkeys()))
+
+    def getLastTerm(self):
+        if not self.log:
+            return succeed(0)
+
+        return (self.getLastIndex()
+            .addCallback(lambda index: self.log[index].term)
+        )
+
+    def getByIndex(self, ix):
+        return succeed(self.log[ix])
+
+    def setVotedFor(self, votedFor):
+        self.votedFor = votedFor
+        return succeed(True)
+
+    def setCurrentTerm(self, currentTerm):
+        self.currentTerm = currentTerm
+        return succeed(True)
+
+    def getVotedFor(self):
+        return succeed(self.votedFor)
+
+    def getCurrentTerm(self):
+        return succeed(self.currentTerm)
+
+    def contains(self, term, index):
+        if term == index == 0:
+            return True
+        return index in self.log and self.log[index].term == term
+
+    def deleteAfter(self, ix, inclusive=True):
+        if not inclusive:
+            ix += 1
+        while True:
+            if not ix in self.log:
+                break
+            del self.log[ix]
+            ix += 1
+
+    def insert(self, entries):
+        for index, entry in entries.iteritems():
+            if index in self.log and self.log[index].term != entry.term:
+                self.deleteAfter(index)
+
+        for index, entry in entries.iteritems():
+            self.log[index] = entry
 
 
 class TestMockStoreInsert(TestCase):
