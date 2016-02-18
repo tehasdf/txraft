@@ -9,6 +9,7 @@ from twisted.internet.defer import inlineCallbacks, returnValue, gatherResults, 
 from twisted.protocols.amp import AMP, CommandLocator, Command
 from twisted.internet.task import LoopingCall
 
+from txraft.commands import AppendEntriesCommand, RequestVotesCommand
 
 Entry = namedtuple('Entry', ['term', 'payload'])
 
@@ -58,8 +59,14 @@ class RaftNode(object):
         ])
 
         while True:
-            peerTerm, result = yield self._rpc.appendEntries(targetId, currentTerm, self.id,
-                prevLogIndex, prevLogTerm, entries, self.commitIndex)
+            command = AppendEntriesCommand(term=currentTerm,
+                leaderId=self.id,
+                prevLogIndex=prevLogIndex,
+                prevLogTerm=prevLogTerm,
+                entries=entries,
+                leaderCommit=self.commitIndex)
+
+            peerTerm, result = yield self._rpc.appendEntries(targetId, command)
             if not result:
                 if peerTerm > currentTerm:
                     raise Exception("term - turn to follower?")
@@ -96,7 +103,12 @@ class RaftNode(object):
             ])
         yield self._store.setCurrentTerm(currentTerm + 1)
 
-        electionResult = yield self._rpc.requestVotes(currentTerm, self.id, logIndex, term)
+        command = RequestVotesCommand(term=currentTerm,
+            candidateId=self.id,
+            lastLogIndex=logIndex,
+            lastLogTerm=term)
+
+        electionResult = yield self._rpc.requestVotes(command)
         if electionResult:
             assert self._state is STATE.CANDIDATE
             self.becomeLeader()
@@ -109,9 +121,9 @@ class RaftNode(object):
         self.heartbeatSender.start(0.05, now=True)
 
     @inlineCallbacks
-    def respond_appendEntries(self, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
+    def respond_appendEntries(self, command):
+        term = command.term
         currentTerm = yield self._store.getCurrentTerm()
-
         if term < currentTerm:
             returnValue((currentTerm, False))
 
@@ -120,22 +132,27 @@ class RaftNode(object):
             if self._state is not STATE.FOLLOWER:
                 self._state = STATE.FOLLOWER
 
-        if not (yield self._store.contains(term=prevLogTerm, index=prevLogIndex)):
+        if not (yield self._store.contains(term=command.prevLogTerm,
+                                           index=command.prevLogIndex)):
             returnValue((currentTerm, False))
 
-        yield self._store.insert(entries)
+        yield self._store.insert(command.entries)
 
-        if leaderCommit > self.commitIndex:
-            if entries:
-                last_index = max(entries.keys())
-                commitIndex = min([leaderCommit, last_index])
+        if command.leaderCommit > self.commitIndex:
+            if command.entries:
+                last_index = max(command.entries.keys())
+                commitIndex = min([command.leaderCommit, last_index])
             else:
-                commitIndex = leaderCommit
+                commitIndex = command.leaderCommit
 
         returnValue((currentTerm, True))
 
     @inlineCallbacks
-    def respond_requestVote(self, term, canditateId, lastLogIndex, lastLogTerm):
+    def respond_requestVote(self, command):
+        term = command.term
+        lastLogTerm = command.lastLogTerm
+        lastLogIndex = command.lastLogIndex
+
         currentTerm = yield self._store.getCurrentTerm()
 
         if term < currentTerm:
@@ -147,15 +164,17 @@ class RaftNode(object):
                 self._state = STATE.FOLLOWER
 
         votedFor = yield self._store.getVotedFor()
-        if votedFor is None or votedFor == canditateId:
+        if votedFor is None or votedFor == command.candidateId:
             currentTerm, logIndex = yield gatherResults([
                 self._store.getCurrentTerm(), # XXX should this be the current term, or term of last log entry?
                 self._store.getLastIndex()
             ])
-            if (currentTerm > lastLogTerm) or (currentTerm == lastLogTerm and logIndex > lastLogIndex):
+
+            if (currentTerm > lastLogTerm) or (currentTerm == lastLogTerm
+                                               and logIndex > lastLogIndex):
                 returnValue((term, False))
             else:
-                yield self._store.setVotedFor(canditateId)
+                yield self._store.setVotedFor(command.candidateId)
                 returnValue((term, True))
         returnValue((term, False))
 
@@ -172,10 +191,10 @@ class MockRPC(object):
         self.nodes.append(node)
 
     @inlineCallbacks
-    def requestVotes(self, term, canditateId, lastLogIndex, lastLogTerm):
+    def requestVotes(self, command):
         responses = [
-            node.respond_requestVote(term, canditateId, lastLogIndex, lastLogTerm)
-            for node in self.nodes if node.id != canditateId
+            node.respond_requestVote(command)
+            for node in self.nodes
         ]
 
         votesYes = 1
@@ -197,6 +216,6 @@ class MockRPC(object):
             if not responses:
                 returnValue(False)
 
-    def appendEntries(self, otherId, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
+    def appendEntries(self, otherId, command):
         target = [node for node in self.nodes if node.id == otherId][0]
-        return target.respond_appendEntries(term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit)
+        return target.respond_appendEntries(command)

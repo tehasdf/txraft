@@ -2,8 +2,8 @@ from twisted.internet.defer import succeed
 from twisted.internet.task import Clock
 from twisted.trial.unittest import TestCase
 
-from . import  Entry, RaftNode, MockRPC, STATE
-
+from txraft import  Entry, RaftNode, MockRPC, STATE
+from txraft.commands import AppendEntriesCommand, RequestVotesCommand
 
 class MockStoreDontUse(object):
     def __init__(self, entries=None):
@@ -135,7 +135,11 @@ class TestElection(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        resp = node.respond_requestVote(4, 2, 4, 4)
+        resp = node.respond_requestVote(RequestVotesCommand(term=4,
+            candidateId=2,
+            lastLogIndex=4,
+            lastLogTerm=4))
+
         term, result = self.successResultOf(resp)
         self.assertTrue(result)
         votedFor = self.successResultOf(store.getVotedFor())
@@ -148,11 +152,17 @@ class TestElection(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        resp = node.respond_requestVote(4, 2, 4, 4)
+        resp = node.respond_requestVote(RequestVotesCommand(term=4,
+            candidateId=2,
+            lastLogIndex=4,
+            lastLogTerm=4))
         term, result = self.successResultOf(resp)
         self.assertFalse(result)
 
-        resp = node.respond_requestVote(4, 3, 4, 4)
+        resp = node.respond_requestVote(RequestVotesCommand(term=4,
+            candidateId=3,
+            lastLogIndex=4,
+            lastLogTerm=4))
         term, result = self.successResultOf(resp)
         self.assertTrue(result)
 
@@ -163,7 +173,10 @@ class TestElection(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        resp = node.respond_requestVote(2, 'id', 4, 4)
+        resp = node.respond_requestVote(RequestVotesCommand(term=2,
+            candidateId='id',
+            lastLogIndex=4,
+            lastLogTerm=4))
         term, result = self.successResultOf(resp)
         self.assertFalse(result)
 
@@ -177,15 +190,24 @@ class TestElection(TestCase):
         clock = Clock()
         node = RaftNode(1, store, rpc, clock=clock)
 
-        resp = node.respond_requestVote(4, 'id', 2, 2)
+        resp = node.respond_requestVote(RequestVotesCommand(term=4,
+            candidateId='id',
+            lastLogIndex=2,
+            lastLogTerm=2))
         term, result = self.successResultOf(resp)
         self.assertFalse(result)
 
-        resp = node.respond_requestVote(4, 'id', 4, 2)
+        resp = node.respond_requestVote(RequestVotesCommand(term=4,
+            candidateId='id',
+            lastLogIndex=4,
+            lastLogTerm=2))
         term, result = self.successResultOf(resp)
         self.assertFalse(result)
 
-        resp = node.respond_requestVote(4, 'id', lastLogIndex=2, lastLogTerm=3)
+        resp = node.respond_requestVote(RequestVotesCommand(term=4,
+            candidateId='id',
+            lastLogIndex=2,
+            lastLogTerm=3))
         term, result = self.successResultOf(resp)
         self.assertFalse(result)
 
@@ -199,8 +221,13 @@ class TestAppendEntries(TestCase):
 
         newentry = Entry(term=0, payload=1)
 
-        resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
-            prevLogTerm=0, entries={1: newentry}, leaderCommit=1)
+        resp = node.respond_appendEntries(AppendEntriesCommand(term=0,
+            leaderId=2,
+            prevLogIndex=0,
+            prevLogTerm=0,
+            entries={1: newentry},
+            leaderCommit=1))
+
         term, result = self.successResultOf(resp)
         self.assertEqual(term, 0)
         self.assertTrue(result)
@@ -214,8 +241,13 @@ class TestAppendEntries(TestCase):
 
         newentry = Entry(term=0, payload=1)
 
-        resp = node.respond_appendEntries(term=0, leaderId=2, prevLogIndex=0,
-            prevLogTerm=0, entries={}, leaderCommit=1)
+        resp = node.respond_appendEntries(AppendEntriesCommand(term=0,
+            leaderId=2,
+            prevLogIndex=0,
+            prevLogTerm=0,
+            entries={},
+            leaderCommit=1))
+
         term, result = self.successResultOf(resp)
         self.assertEqual(term, 0)
         self.assertTrue(result)
